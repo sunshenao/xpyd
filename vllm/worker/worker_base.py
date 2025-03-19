@@ -220,6 +220,7 @@ class WorkerInput:
     blocks_to_copy: Optional[torch.Tensor] = None
     virtual_engine: int = 0
     num_steps: int = 1
+    kv_match: list = None
 
     @classmethod
     def from_broadcasted_tensor_dict(
@@ -423,6 +424,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             if self.kv_cache is not None else None,
             intermediate_tensors=intermediate_tensors,
             num_steps=num_steps,
+            kv_match=worker_input.kv_match,
             **kwargs,
         )
 

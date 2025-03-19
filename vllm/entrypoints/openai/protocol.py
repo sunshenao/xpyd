@@ -66,11 +66,11 @@ class OpenAIBaseModel(BaseModel):
             cls.field_names = field_names
 
         # Compare against both field names and aliases
-        if any(k not in field_names for k in data):
-            logger.warning(
-                "The following fields were present in the request "
-                "but ignored: %s",
-                data.keys() - field_names)
+        # if any(k not in field_names for k in data):
+        #     logger.warning(
+        #         "The following fields were present in the request "
+        #         "but ignored: %s",
+        #         data.keys() - field_names)
         return result
 
 
@@ -1132,6 +1132,7 @@ class CompletionResponseStreamChoice(OpenAIBaseModel):
             "to stop, None if the completion finished for some other reason "
             "including encountering the EOS token"),
     )
+    kv_match: list = None
 
 
 class CompletionStreamResponse(OpenAIBaseModel):

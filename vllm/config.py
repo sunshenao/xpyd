@@ -2870,6 +2870,7 @@ class KVTransferConfig(BaseModel):
 
     # any extra config that the connector may need
     kv_connector_extra_config: dict[str, Any] = {}
+    kv_matchs: list[list] = [[0,1]]
 
     def compute_hash(self) -> str:
         """

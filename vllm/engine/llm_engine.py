@@ -1293,7 +1293,7 @@ class LLMEngine:
                 else:
                     seq.append_token_id(sample.output_token, sample.logprobs)
 
-    def step(self) -> List[Union[RequestOutput, PoolingRequestOutput]]:
+    def step(self,kv_match = None) -> List[Union[RequestOutput, PoolingRequestOutput]]:
         """Performs one decoding iteration and returns newly generated results.
 
         .. figure:: https://i.imgur.com/sv2HssD.png
@@ -1425,6 +1425,7 @@ class LLMEngine:
                 finished_requests_ids=finished_requests_ids,
                 # We use ExecuteModelRequest to pass the last sampled_token_ids
                 # to each of the non-last PP stages for in-place prepare_input.
+                kv_match=kv_match,
                 last_sampled_token_ids=last_sampled_token_ids)
 
             if allow_async_output_proc:

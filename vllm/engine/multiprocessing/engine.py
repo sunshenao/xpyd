@@ -227,7 +227,7 @@ class MQLLMEngine:
     def engine_step(self) -> List[RequestOutput]:
         """Engine step wrapper with error handling."""
         try:
-            return self.engine.step()
+            return self.engine.step(self.kv_match)
         except SystemExit:
             raise
         except InputProcessingError as e:
@@ -252,7 +252,8 @@ class MQLLMEngine:
             while self.input_socket.poll(timeout=0) != 0:
                 frames = self.input_socket.recv_multipart(copy=False)
                 request = pickle.loads(frames[0].buffer)
-
+                self.kv_match = request.kv_match
+                
                 if isinstance(request, RPCProcessRequest):
                     if len(frames) > 1:
                         # Use cloudpickle for logits processors

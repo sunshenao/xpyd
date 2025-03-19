@@ -48,7 +48,9 @@ class PyNcclPipe(KVPipeBase):
                  local_rank: int,
                  config: KVTransferConfig,
                  device: Optional[str] = None,
-                 port_offset: int = 0):
+                 port_offset: int = 0,
+                 kv_match=None):
+        self.kv_match = kv_match
         self.config = config
         self.local_rank = local_rank
         self.kv_rank = self.config.kv_rank
@@ -59,7 +61,8 @@ class PyNcclPipe(KVPipeBase):
             self.device = self._select_device(device)
 
         # build distributed connection and send/recv implementation
-        store_timeout = self.config.get_from_extra_config("store_timeout", 300)
+        # print(self.config,self.kv_match,self.local_rank,port_offset,'-='*89)
+        store_timeout = self.config.get_from_extra_config("store_timeout", 60)
         self.group = StatelessProcessGroup.create(
             host=self.config.kv_ip,
             port=self.config.kv_port + port_offset,
@@ -67,13 +70,24 @@ class PyNcclPipe(KVPipeBase):
             world_size=self.kv_parallel_size,
             store_timeout=store_timeout,
         )
+        # print('++++'*18)
         # add a barrier to make sure the connection is initiated properly
         self.group.barrier()
+        # print('------'*19)
         impl = self._get_device_send_recv_impl(self.group)
         self.device_send_func, self.device_recv_func = impl
         # set target rank
-        self.target_rank_for_send = (self.kv_rank + 1) % self.kv_parallel_size
-        self.target_rank_for_recv = (self.kv_rank - 1) % self.kv_parallel_size
+        if self.config.is_kv_producer:
+
+            self.target_rank_for_send = self.kv_match[1] 
+            self.target_rank_for_recv = self.kv_match[1]
+        else:
+            self.target_rank_for_send = self.kv_match[0] 
+            self.target_rank_for_recv = self.kv_match[0]
+
+
+        # self.target_rank_for_send = (self.kv_rank + 1) % self.kv_parallel_size
+        # self.target_rank_for_recv = (self.kv_rank - 1) % self.kv_parallel_size
 
         # transportation-related variables
         self.transport_thread: Optional[ThreadPoolExecutor] = None

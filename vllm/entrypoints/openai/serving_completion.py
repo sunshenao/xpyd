@@ -93,6 +93,8 @@ class OpenAIServingCompletion(OpenAIServing):
         request_id = f"cmpl-{self._base_request_id(raw_request)}"
         created_time = int(time.time())
 
+        self.kv_match = getattr(request, 'kv_match', None)
+
         request_metadata = RequestResponseMetadata(request_id=request_id)
         if raw_request:
             raw_request.state.request_metadata = request_metadata
@@ -157,6 +159,7 @@ class OpenAIServingCompletion(OpenAIServing):
                         prompt=engine_prompt,
                         request_id=request_id,
                         params=sampling_params,
+                        kv_match=self.kv_match,
                     )
                 else:
                     generator = self.engine_client.generate(
@@ -167,6 +170,7 @@ class OpenAIServingCompletion(OpenAIServing):
                         prompt_adapter_request=prompt_adapter_request,
                         trace_headers=trace_headers,
                         priority=request.priority,
+                        #kv_match=self.kv_match,
                     )
 
                 generators.append(generator)

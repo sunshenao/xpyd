@@ -56,6 +56,7 @@ class EngineClient(ABC):
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         priority: int = 0,
+        kv_match:list = None,
     ) -> AsyncGenerator[RequestOutput, None]:
         """Generate outputs for a request."""
         ...
@@ -65,6 +66,7 @@ class EngineClient(ABC):
         prompt: PromptType,
         request_id: str,
         params: BeamSearchParams,
+        kv_match:list = None,
     ) -> AsyncGenerator[RequestOutput, None]:
 
         beam_width = params.beam_width
@@ -126,7 +128,7 @@ class EngineClient(ABC):
                 task = asyncio.create_task(
                     collect_from_async_generator(
                         self.generate(individual_prompt, beam_search_params,
-                                      request_id_item)))
+                                      request_id_item,kv_match=kv_match)))
                 tasks.append(task)
 
             output = await asyncio.gather(*tasks)

@@ -376,6 +376,7 @@ class Worker(LocalOrDistributedWorkerBase):
             blocks_to_copy=blocks_to_copy,
             virtual_engine=virtual_engine,
             num_steps=num_steps,
+            kv_match=execute_model_req.kv_match
         )
 
     @torch.inference_mode()

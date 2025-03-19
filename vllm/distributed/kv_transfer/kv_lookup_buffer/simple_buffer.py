@@ -25,7 +25,7 @@ logger = init_logger(__name__)
 
 class SimpleBuffer(KVLookupBufferBase):
 
-    def __init__(self, signal_pipe: KVPipeBase, data_pipe: KVPipeBase,
+    def __init__(self, signal_pipes: dict[KVPipeBase], data_pipes: dict[KVPipeBase],
                  buffer_size_thresh: float):
         """
         signal_pipe: on CPU
@@ -43,8 +43,8 @@ class SimpleBuffer(KVLookupBufferBase):
         self.buffer_size = 0
         self.buffer_size_threshold = buffer_size_thresh
         self.buffer_cv = threading.Condition()
-        self.signal_pipe = signal_pipe
-        self.data_pipe = data_pipe
+        self.signal_pipes = signal_pipes
+        self.data_pipes = data_pipes
         self.request_handling_thread: Optional[threading.Thread] = None
 
         self.normal_signal = torch.tensor([0], device="cpu")
@@ -80,13 +80,13 @@ class SimpleBuffer(KVLookupBufferBase):
         return 0
 
     def _send_tensor_and_dec_size(self,
-                                  tensor: Optional[torch.Tensor]) -> None:
+                                  tensor: Optional[torch.Tensor],key:str) -> None:
 
         assert tensor is not None, "Use self.data_pipe.send(None) instead"
         self.buffer_size -= tensor.element_size() * tensor.numel()
         if tensor.dtype == torch.bool:
             tensor = tensor.float()
-        self.data_pipe.send_tensor(tensor)
+        self.data_pipes[key].send_tensor(tensor)
 
     def _get_element_size(self, data: Optional[Union[List, torch.Tensor]]):
 
@@ -132,19 +132,19 @@ class SimpleBuffer(KVLookupBufferBase):
     def _is_end_signal(self, signal):
         return signal is None
 
-    def drop_select_handler(self):
+    def drop_select_handler(self,key):
 
         try:
 
             while True:
-                signal = self.signal_pipe.recv_tensor()
+                signal = self.signal_pipes[key].recv_tensor()
                 if self._is_end_signal(signal):
                     logger.info("Received end signal!")
                     break
 
-                input_tokens = self.data_pipe.recv_tensor()
+                input_tokens = self.data_pipes[key].recv_tensor()
 
-                roi = self.data_pipe.recv_tensor()
+                roi = self.data_pipes[key].recv_tensor()
                 assert roi is not None, "Please provide the roi when sending "\
                     "drop-select request"
                 roi = (roi > 0.5)
@@ -173,7 +173,7 @@ class SimpleBuffer(KVLookupBufferBase):
                     # in case the tensor is freed before sending finishes
                     matched_item = self.buffer.popleft()
                     for tensor in matched_item:
-                        self._send_tensor_and_dec_size(tensor)
+                        self._send_tensor_and_dec_size(tensor,key)
                     self.buffer_cv.notify()
 
         except RuntimeError as e:
@@ -184,8 +184,8 @@ class SimpleBuffer(KVLookupBufferBase):
 
     def drop_select(
             self, input_tokens: Optional[torch.Tensor],
-            roi: Optional[torch.Tensor]) -> List[Optional[torch.Tensor]]:
-
+            roi: Optional[torch.Tensor],kv_match=None) -> List[Optional[torch.Tensor]]:
+        key_pipe = str(kv_match[0])+'_'+str(kv_match[1])
         assert self.request_handling_thread is None, \
             "drop_select should be called by the KV cache consumer "\
             "(e.g. the decode vLLM instance)"
@@ -195,33 +195,33 @@ class SimpleBuffer(KVLookupBufferBase):
         if isinstance(roi, torch.Tensor):
             roi = roi.clone().float()
 
-        self.signal_pipe.send_tensor(self.normal_signal)
-        self.data_pipe.send_tensor(input_tokens)
-        self.data_pipe.send_tensor(roi)
+        self.signal_pipes[key_pipe].send_tensor(self.normal_signal)
+        self.data_pipes[key_pipe].send_tensor(input_tokens)
+        self.data_pipes[key_pipe].send_tensor(roi)
 
-        input_tokens = self.data_pipe.recv_tensor()
-        roi = self.data_pipe.recv_tensor()
+        input_tokens = self.data_pipes[key_pipe].recv_tensor()
+        roi = self.data_pipes[key_pipe].recv_tensor()
         if roi is not None:
             # convert from float tensor to bool tensor
             # as PyNccl does not support sending bool tensor
             roi = (roi > 0.5)
-        key = self.data_pipe.recv_tensor()
-        value = self.data_pipe.recv_tensor()
-        hidden = self.data_pipe.recv_tensor()
+        key = self.data_pipes[key_pipe].recv_tensor()
+        value = self.data_pipes[key_pipe].recv_tensor()
+        hidden = self.data_pipes[key_pipe].recv_tensor()
 
         return [input_tokens, roi, key, value, hidden]
 
     def insert(self, input_tokens: torch.Tensor, roi: torch.Tensor,
                key: torch.Tensor, value: torch.Tensor,
-               hidden: torch.Tensor) -> None:
+               hidden: torch.Tensor,kv_match=None) -> None:
 
         self._add_to_buffer(input_tokens, roi, key, value, hidden)
-
+        key_pipe = str(kv_match[0])+'_'+str(kv_match[1])
         # when calling the insert, the current process is a sender
         # need to launch the request handler and start listening to request.
         if self.request_handling_thread is None:
             self.request_handling_thread = threading.Thread(
-                target=self.drop_select_handler)
+                target=self.drop_select_handler,args=(key_pipe,))
             self.request_handling_thread.start()
 
     def close(self):

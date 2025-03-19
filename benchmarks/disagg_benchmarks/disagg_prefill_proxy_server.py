@@ -32,7 +32,7 @@ async def forward_request(url, data):
 async def handle_request():
     try:
         original_request_data = await request.get_json()
-
+        original_request_data['kv_match'] = [0,1]
         prefill_request = original_request_data.copy()
         # change max_tokens = 1 to let it only do prefill
         prefill_request['max_tokens'] = 1

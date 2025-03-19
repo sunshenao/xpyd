@@ -1,5 +1,3 @@
-# SPDX-License-Identifier: Apache-2.0
-
 import asyncio
 import itertools
 
@@ -43,7 +41,8 @@ class RoundRobinProxy:
 
 
 async def main():
-    proxy = RoundRobinProxy([8100, 8200])
+    proxy = RoundRobinProxy([8100,8200,8300,8400])
+    # proxy = RoundRobinProxy([8100,8200,8300])
     app = web.Application()
     app.router.add_route('*', '/{path:.*}', proxy.handle_request)
 
@@ -60,5 +59,3 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-# [[0,7],[1,7],[2,7],[3,7],[4,7],[5,7],[6,7]]
-# [[0,7],[1,7],[2,7],[3,7],[4,7],[5,7],[0,6],[1,6],[2,6],[3,6],[4,6],[5,6]]

@@ -3,7 +3,7 @@
 # Requirement: 2x GPUs.
 
 
-# Model: /root/models/Qwen/Qwen2.5-7B-Instruct
+# Model: /root/models/Qwen/Qwen2.5-7B-Instruct-GPTQ-Int8
 # Query: 1024 input tokens, 6 output tokens, QPS 2/4/6/8, 100 requests
 # Resource: 2x GPU
 # Approaches:
@@ -23,7 +23,7 @@ kill_gpu_processes() {
   # kill all processes on GPU.
   pgrep pt_main_thread | xargs -r kill -9
   pgrep python3 | xargs -r kill -9
-  for port in 8000 8100 8200; do lsof -t -i:$port | xargs -r kill -9; done
+  for port in 8000 8100 8200 8300 8400 8500 8600 8700 8800; do lsof -t -i:$port | xargs -r kill -9; done
   sleep 1
 }
 
@@ -47,45 +47,92 @@ launch_chunked_prefill() {
     --port 8100 \
     --max-model-len 10000 \
     --enable-chunked-prefill \
-    --gpu-memory-utilization 0.85 &
+    --gpu-memory-utilization 0.8 &
   CUDA_VISIBLE_DEVICES=1 python3 \
     -m vllm.entrypoints.openai.api_server \
     --model $model \
     --port 8200 \
     --max-model-len 10000 \
     --enable-chunked-prefill \
-    --gpu-memory-utilization 0.85 &
-  wait_for_server 8100
+    --gpu-memory-utilization 0.8 &
+
+  CUDA_VISIBLE_DEVICES=2 python3 \
+    -m vllm.entrypoints.openai.api_server \
+    --model $model \
+    --port 8300 \
+    --max-model-len 10000 \
+    --enable-chunked-prefill \
+    --gpu-memory-utilization 0.8 &
+
+  CUDA_VISIBLE_DEVICES=3 python3 \
+    -m vllm.entrypoints.openai.api_server \
+    --model $model \
+    --port 8400 \
+    --max-model-len 10000 \
+    --enable-chunked-prefill \
+    --gpu-memory-utilization 0.8 &
+  
+  
+  
+  wait_for_server 8300
   wait_for_server 8200
-  python3 round_robin_proxy.py &
+  wait_for_server 8100
+  wait_for_server 8400
+
+
+  python3 round_robin_proxy_xpyd.py &
   sleep 1
 }
 
-
+# export MOONCAKE_CONFIG_PATH='/root/code/kvcache/Mooncake/vllm/mooncake.json'
+# --enable-chunked-prefill \
 launch_disagg_prefill() {
-  model="/root/models/Qwen/Qwen2.5-7B-Instruct" 
+  model="/root/models/Qwen/Qwen2.5-7B-Instruct"  # -GPTQ-Int4
   # disagg prefill
   CUDA_VISIBLE_DEVICES=0 python3 \
     -m vllm.entrypoints.openai.api_server \
     --model $model \
     --port 8100 \
     --max-model-len 10000 \
-    --gpu-memory-utilization 0.85 \
+    --gpu-memory-utilization 0.8 \
     --kv-transfer-config \
-    '{"kv_connector":"PyNcclConnector","kv_role":"kv_producer","kv_rank":0,"kv_parallel_size":2,"kv_buffer_size":5e9}' &
+    '{"kv_connector":"PyNcclConnector","kv_role":"kv_producer","kv_rank":0,"kv_parallel_size":4,"kv_buffer_size":5e9,"kv_matchs":[[0,3],[1,3],[2,3]]}' &
 
   CUDA_VISIBLE_DEVICES=1 python3 \
     -m vllm.entrypoints.openai.api_server \
     --model $model \
     --port 8200 \
     --max-model-len 10000 \
-    --gpu-memory-utilization 0.85 \
+    --gpu-memory-utilization 0.8 \
     --kv-transfer-config \
-    '{"kv_connector":"PyNcclConnector","kv_role":"kv_consumer","kv_rank":1,"kv_parallel_size":2,"kv_buffer_size":5e9}' &
+    '{"kv_connector":"PyNcclConnector","kv_role":"kv_producer","kv_rank":1,"kv_parallel_size":4,"kv_buffer_size":5e9,"kv_matchs":[[0,3],[1,3],[2,3]]}' &
+  
+  CUDA_VISIBLE_DEVICES=2 python3 \
+    -m vllm.entrypoints.openai.api_server \
+    --model $model \
+    --port 8300 \
+    --max-model-len 10000 \
+    --gpu-memory-utilization 0.8 \
+    --kv-transfer-config \
+    '{"kv_connector":"PyNcclConnector","kv_role":"kv_producer","kv_rank":2,"kv_parallel_size":4,"kv_buffer_size":5e9,"kv_matchs":[[0,3],[1,3],[2,3]]}' &
+  
+# PyNcclConnector1MooncakeConnector
+  CUDA_VISIBLE_DEVICES=3 python3 \
+    -m vllm.entrypoints.openai.api_server \
+    --model $model \
+    --port 8400 \
+    --max-model-len 10000 \
+    --gpu-memory-utilization 0.8 \
+    --kv-transfer-config \
+    '{"kv_connector":"PyNcclConnector","kv_role":"kv_consumer","kv_rank":3,"kv_parallel_size":4,"kv_buffer_size":5e9,"kv_matchs":[[0,3],[1,3],[2,3]]}' &
 
   wait_for_server 8100
   wait_for_server 8200
-  python3 disagg_prefill_proxy_server.py &
+  wait_for_server 8300
+
+  wait_for_server 8400
+
+  python3 disagg_xpyd_proxy_server.py &
   sleep 1
 }
 
@@ -93,7 +140,7 @@ launch_disagg_prefill() {
 benchmark() {
   results_folder="./results"
   model="/root/models/Qwen/Qwen2.5-7B-Instruct"
-  dataset_name="sonnet"
+  dataset_name="sonnet" # sonnet random
   dataset_path="../sonnet_4x.txt"
   num_prompts=100
   qps=$1
@@ -117,7 +164,8 @@ benchmark() {
           --result-filename "$tag"-qps-"$qps".json \
           --request-rate "$qps" \
           --random-range-ratio 0.2 \
-          --random-input-len 512 
+          --random-input-len 512 \
+
   sleep 2
 }
 
@@ -142,8 +190,8 @@ main() {
   done
   cd disagg_benchmarks
 
-  rm -rf results
-  mkdir results
+  # rm -rf results
+  # mkdir results
 
   default_output_len=50
 
@@ -151,17 +199,18 @@ main() {
 
   export VLLM_HOST_IP=$(hostname -I | awk '{print $1}')
 
-  kill_gpu_processes
+  # kill_gpu_processes
 
-  launch_disagg_prefill
-  for qps in 10; do
-  benchmark $qps $default_output_len $default_input_len disagg_prefill
-  done
+  # launch_disagg_prefill
+  # for qps in 16 12 8 4; do
+  # benchmark $qps $default_output_len $default_input_len disagg_prefill
+  # done
+  
 
   kill_gpu_processes
 
   launch_chunked_prefill
-  for qps in 10; do
+  for qps in 16 12 8 4; do
   benchmark $qps $default_output_len $default_input_len chunked_prefill
   done
 
